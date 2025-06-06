@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>User Dashboard</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(to right, #00c6ff, #0072ff);
+      color: #333;
+    }
+    .container {
+      max-width: 900px;
+      margin: 40px auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+      position: relative;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    button.logout-btn {
+      position: absolute;
+      right: 30px;
+      top: 30px;
+      background: #ff4d4d;
+      padding: 8px 14px;
+      border: none;
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button.logout-btn:hover {
+      background: #e04343;
+    }
+    .book {
+      border: 1px solid #ccc;
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 25px;
+      background-color: #f9f9f9;
+    }
+    .book img {
+      max-width: 100px;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    textarea {
+      width: 100%;
+      height: 60px;
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 10px;
+      resize: none;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+    button.submit-comment {
+      padding: 8px 12px;
+      background: #0072ff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-top: 8px;
+      font-weight: 600;
+    }
+    button.submit-comment:hover {
+      background: #005ac1;
+    }
+    .comments {
+      margin-top: 15px;
+      font-size: 0.9rem;
+      background: #eef;
+      padding: 10px;
+      border-radius: 8px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .comment {
+      margin-bottom: 8px;
+      border-bottom: 1px dashed #ccc;
+      padding-bottom: 5px;
+    }
+    .comment:last-child {
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <button class="logout-btn" onclick="logout()">Logout</button>
+    <h2>User Dashboard</h2>
+    <div id="bookList">Loading books...</div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+
+    function parseJwt(token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c =>
+          '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        ).join(''));
+        return JSON.parse(jsonPayload);
+      } catch {
+        return null;
+      }
+    }
+
+    const authUser = token ? parseJwt(token) : null;
+    if (!authUser || authUser.role !== 'user') {
+      alert('Access denied. Users only.');
+      window.location.href = 'login.html';
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      window.location.href = 'login.html';
+    }
+
+    async function loadBooks() {
+      try {
+        const res = await fetch(`${API_BASE}/books`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch books');
+        const books = await res.json();
+        const container = document.getElementById('bookList');
+        container.innerHTML = '';
+
+        books.forEach(book => {
+          const div = document.createElement('div');
+          div.className = 'book';
+          div.innerHTML = `
+            <strong>${book.name}</strong> by ${book.writer}<br/>
+            <em>${book.journals}</em><br/>
+            ${book.imageUrl ? `<img src="http://localhost:5000${book.imageUrl}" alt="Book Cover">` : ''}
+            <div class="comments" id="comments-${book._id}">
+              <strong>Comments:</strong>
+              <div class="comment-list"></div>
+            </div>
+            <textarea id="comment-${book._id}" placeholder="Write a comment..."></textarea>
+            <button class="submit-comment" onclick="submitComment('${book._id}')">Submit Comment</button>
+          `;
+          container.appendChild(div);
+          loadComments(book._id);
+        });
+      } catch (error) {
+        document.getElementById('bookList').innerHTML = 'Failed to load books.';
+      }
+    }
+
+    async function submitComment(bookId) {
+      const textarea = document.getElementById(`comment-${bookId}`);
+      const text = textarea.value.trim();
+
+      if (!text) {
+        alert('Comment cannot be empty!');
+        return;
+      }
+
+      const comment = {
+        username: authUser.username,
+        text,
+        date: new Date().toLocaleString()
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/books/${bookId}/comments`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(comment)
+        });
+
+        if (!res.ok) throw new Error('Failed to submit comment');
+
+        const result = await res.json();
+        alert(result.message || 'Comment added!');
+        textarea.value = '';
+        loadComments(bookId);
+      } catch (err) {
+        alert('Error submitting comment.');
+      }
+    }
+
+    async function loadComments(bookId) {
+      try {
+        const res = await fetch(`${API_BASE}/books/${bookId}/comments`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch comments');
+        const comments = await res.json();
+        const commentList = document.querySelector(`#comments-${bookId} .comment-list`);
+        commentList.innerHTML = '';
+
+        comments.forEach(c => {
+          const div = document.createElement('div');
+          div.className = 'comment';
+          div.innerHTML = `<strong>${c.username}</strong> (${c.date}):<br/>${c.text}`;
+          commentList.appendChild(div);
+        });
+      } catch {
+        console.error('Failed to load comments');
+      }
+    }
+
+    loadBooks();
+  </script>
+</body>
+</html>
